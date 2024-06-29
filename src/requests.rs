@@ -1,24 +1,24 @@
 use std::u64;
 
-use reqwest::{header::HeaderMap, Client, Response};
-use crate::errors::RequestError;
+use reqwest::{header::HeaderMap, Client, RequestBuilder, Response};
+use crate::errors::LeviError;
 
-pub async fn check_url(client: &Client, url: &str) -> Result<Response, RequestError> {
-    match client.head(url).send().await {
+pub async fn check_request(request: RequestBuilder) -> Result<bool, LeviError> {
+    match request.send().await {
         Ok(res) => {
             if res.status().is_success() {
-                Ok(res)
+                Ok(true)
             } else {
-                Err(RequestError::Status(res.status()))
+                Err(LeviError::HttpStatus(res.status()))
             }
         },
         Err(e) => {
-            Err(RequestError::Network(e))
+            Err(LeviError::Network(e))
         },
     }
 }
 
-pub async fn get_headers(client: &Client, url: &str, response: &Response) -> Result<Option<u64>, RequestError>{
+pub async fn get_headers(client: &Client, url: &str, response: &Response) -> Result<Option<u64>, LeviError>{
     let header_content_length = extract_content_len_from_headers(response.headers());
 
     let content_length = match header_content_length {

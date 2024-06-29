@@ -1,32 +1,23 @@
 use reqwest;
-use std::fmt;
+use thiserror::Error;
+use tokio::io;
+use tokio::time::error::Elapsed;
 
-#[derive(Debug)]
-pub enum RequestError {
-    Status(reqwest::StatusCode),
-    Network(reqwest::Error),
-}
+#[derive(Error, Debug)]
+pub enum LeviError {
 
-impl fmt::Display for RequestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RequestError::Status(code) => write!(f, "HTTP request failed with status: {}", code),
-            RequestError::Network(err) => write!(f, "Network or request error: {}", err),
-        }
-    }
-}
+    #[error("HTTP request failed with status: {0:?}")]
+    HttpStatus(reqwest::StatusCode),
+   
+    #[error("Network or request error: {0:?}")]
+    Network(#[from] reqwest::Error),
 
-impl std::error::Error for RequestError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            RequestError::Status(_) => None,
-            RequestError::Network(err) => Some(err),
-        }
-    }
-}
-
-impl From<reqwest::Error> for RequestError {
-    fn from(err: reqwest::Error) -> Self {
-        RequestError::Network(err)
-    }
+    #[error("Elapsed timeout")]
+    TimeoutElapsed(#[from] Elapsed),
+   
+    #[error("Error checking on file: {0:?}")]
+    File(#[from] io::Error),
+   
+    #[error("File already exists: {0:?}")]
+    FileExists(String),
 }

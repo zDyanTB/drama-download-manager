@@ -1,4 +1,4 @@
-use errors::RequestError;
+use errors::LeviError;
 use reqwest::Client;
 
 mod errors;

@@ -358,6 +358,7 @@ name = "leviathan"
 version = "0.1.0"
 dependencies = [
  "reqwest",
+ "thiserror",
  "tokio",
 ]
 
