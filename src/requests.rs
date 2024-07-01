@@ -1,13 +1,31 @@
-use std::u64;
-
-use reqwest::{header::HeaderMap, Client, RequestBuilder, Response};
+use reqwest::{header, RequestBuilder, Response};
 use crate::errors::LeviError;
 
-pub async fn check_request(request: RequestBuilder) -> Result<bool, LeviError> {
+// pub struct Requested {
+//     pub response: Response,
+//     pub content_length: Option<usize>,
+//     pub resumable: bool,
+// }
+
+// impl Requested {
+//     pub async fn new(request: RequestBuilder) -> Result<(), LeviError> {
+
+//         let res = check_request(request).await?;
+//         let content_len = res.content_length();
+
+//         
+//         
+//         Ok(())
+//     }
+//     
+//     
+// }
+
+pub async fn check_request(request: RequestBuilder) -> Result<Response, LeviError> {
     match request.send().await {
         Ok(res) => {
             if res.status().is_success() {
-                Ok(true)
+                Ok(res)
             } else {
                 Err(LeviError::HttpStatus(res.status()))
             }
@@ -18,32 +36,9 @@ pub async fn check_request(request: RequestBuilder) -> Result<bool, LeviError> {
     }
 }
 
-pub async fn get_headers(client: &Client, url: &str, response: &Response) -> Result<Option<u64>, LeviError>{
-    let header_content_length = extract_content_len_from_headers(response.headers());
-
-    let content_length = match header_content_length {
-        Some(0) => {
-            // Site does not provide head
-            // try get
-
-            let get_result = client.get(url).send().await?;
-            let get_content_length = get_result.content_length();
-
-            get_content_length
-        },
-        Some(_) => {
-            header_content_length
-        },
-        _ => {
-            None
-        }
-    };
-    Ok(content_length)
-}
-
-fn extract_content_len_from_headers(headers: &HeaderMap) -> Option<u64> {
-    headers
-        .get("content-length")
-        .and_then(|ct_len| ct_len.to_str().ok())
-        .and_then(|ct_len| ct_len.parse().ok())
+pub async fn is_resumable(res: &Response) -> bool {
+    match res.headers().get(header::ACCEPT_RANGES) {
+        Some(_) => true,
+        None => false,
+    }
 }

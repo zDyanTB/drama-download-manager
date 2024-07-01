@@ -12,6 +12,9 @@ pub enum LeviError {
     #[error("Network or request error: {0:?}")]
     Network(#[from] reqwest::Error),
 
+    #[error("Url error: {0:?}")]
+    Url(String),
+
     #[error("Elapsed timeout")]
     TimeoutElapsed(#[from] Elapsed),
    

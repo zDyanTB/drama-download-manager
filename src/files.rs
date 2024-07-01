@@ -1,13 +1,29 @@
-use tokio::fs::File;
-use std::path::Path;
+use tokio::fs::{self, File};
 use crate::errors::LeviError;
 
-pub async fn create_file(file_path: &str) -> Result<File, LeviError> {
+pub async fn create_file(file_path: &String, append: bool) -> Result<File, LeviError> {
 
-    if Path::new(file_path).try_exists()? {
-        Err(LeviError::FileExists(file_path.to_string()))
+    if append {
+        let file = fs::OpenOptions::new()
+            .append(append)
+            .open(file_path)
+            .await?;
+
+        Ok(file)
     } else {
+
         Ok(File::create(file_path).await?)
     }
+}
 
+pub async fn get_file_size(file: &String) -> Result<Option<String>, LeviError>{
+    let file_size = File::open(file)
+        .await?
+        .metadata()
+        .await?
+        .len();
+
+    let range = format!("bytes={}-", file_size);
+
+    Ok(Some(range))
 }
