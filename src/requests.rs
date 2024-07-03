@@ -22,8 +22,10 @@ use crate::errors::LeviError;
 // }
 
 pub async fn check_request(request: RequestBuilder) -> Result<Response, LeviError> {
+    println!("Checking request");
     match request.send().await {
         Ok(res) => {
+            println!("Checking request status code");
             if res.status().is_success() {
                 Ok(res)
             } else {
@@ -37,6 +39,7 @@ pub async fn check_request(request: RequestBuilder) -> Result<Response, LeviErro
 }
 
 pub async fn is_resumable(res: &Response) -> bool {
+    println!("Cheking if request support range 'bytes'");
     match res.headers().get(header::ACCEPT_RANGES) {
         Some(_) => true,
         None => false,

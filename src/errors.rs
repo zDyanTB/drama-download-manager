@@ -21,6 +21,6 @@ pub enum LeviError {
     #[error("Error checking on file: {0:?}")]
     File(#[from] io::Error),
    
-    #[error("File already exists: {0:?}")]
+    #[error("File already exists and doesn't support resuming: {0:?}")]
     FileExists(String),
 }
