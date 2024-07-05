@@ -5,7 +5,7 @@ use std::path::Path;
 pub async fn create_file(file_path: &String, append: bool) -> Result<File, LeviError> {
 
     if append {
-        println!("Creating file on append mode");
+        println!("Creating file on append mode: {:?}", file_path);
         let file = fs::OpenOptions::new()
             .append(append)
             .create(true)
@@ -14,17 +14,16 @@ pub async fn create_file(file_path: &String, append: bool) -> Result<File, LeviE
 
         Ok(file)
     } else {
-        if Path::new(file_path).try_exists()? {
+        if Path::new(&file_path).try_exists()? {
             return Err(LeviError::FileExists(file_path.to_string()));
         }
-
-        println!("Creating file on overwrite mode");
+        println!("Creating file on overwrite mode: {:?}", file_path);
         Ok(File::create(file_path).await?)
     }
 }
 
 pub async fn get_file_size(file: &String) -> Result<u64, LeviError>{
-    println!("Retrieving file size");
+    println!("Retrieving file size: {}", file);
     let range = File::open(file)
         .await?
         .metadata()

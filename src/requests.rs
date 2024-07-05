@@ -22,10 +22,9 @@ use crate::errors::LeviError;
 // }
 
 pub async fn check_request(request: RequestBuilder) -> Result<Response, LeviError> {
-    println!("Checking request");
+    println!("Checking request: {:?}", request);
     match request.send().await {
         Ok(res) => {
-            println!("Checking request status code");
             if res.status().is_success() {
                 Ok(res)
             } else {
@@ -36,6 +35,16 @@ pub async fn check_request(request: RequestBuilder) -> Result<Response, LeviErro
             Err(LeviError::Network(e))
         },
     }
+}
+
+// Used to get content-length from HEAD request
+// since .content_length() only returns from GET
+pub async fn get_content_length(res: &Response) -> Option<u64> {
+    let headers = res.headers();
+    headers
+        .get("content-length")
+        .and_then(|ct_len| ct_len.to_str().ok())
+        .and_then(|ct_len| ct_len.parse().ok())
 }
 
 pub async fn is_resumable(res: &Response) -> bool {

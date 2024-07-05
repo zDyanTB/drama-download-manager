@@ -1,51 +1,92 @@
-use reqwest::{Client, Response};
-use tokio::io::AsyncWriteExt;
-use tokio::fs::File;
+use futures::{ stream, StreamExt};
+use reqwest::{Client, RequestBuilder};
+use tokio::io::{BufReader, BufWriter, AsyncReadExt, AsyncWriteExt};
+use tokio::fs::{self, File};
 use tokio::select;
 use tokio::time::{timeout, Duration};
+use std::path::Path;
 
 use crate::links::FileLink;
 use crate::errors::LeviError;
-use crate::requests::{ check_request, is_resumable };
+use crate::requests::{ check_request, get_content_length, is_resumable };
 use crate::files::{create_file, get_file_size};
 
-pub async fn download(client: &Client, timeout_in_secs: usize, path: &str, url: &str) -> Result<(), LeviError> {
+// TODO debug this file
+pub async fn download(client: &Client, timeout_in_secs: usize, num_parts: usize, file_path: String, url: &str) -> Result<String, LeviError> {
     // https://github.com/agourlay/dlm/issues/293
-    
-    let head_req = check_request(client.head(url)).await?;
-    let resumable = is_resumable(&head_req).await;
+    let head_res = check_request(client.head(url)).await?;
+    let resumable = is_resumable(&head_res).await;
+    let total_size = match get_content_length(&head_res).await {
+        Some(ct) => ct,
+        None => return Err(LeviError::Url("Url doesn't provide content_length".to_string())),
+    };
+    println!("{total_size}");
 
 
     let file_link = FileLink::new(url)?;
     let (extension, filename) = match file_link.extension {
         Some(ext) => (ext, file_link.filename),
-        None => {( "noext".to_string(), "file_link.filename".to_string() )},
+        None => {( "noext".to_string(), file_link.filename )},
     };
-    let file_destination = format!("{path}{filename}.{extension}");
-    let file = create_file(&file_destination, resumable).await?;
+    let file_destination = format!("{}{}", file_path, filename);
+    let final_file_path = format!("{}.{}", file_destination, extension);
 
+    if Path::new(&final_file_path).try_exists()? {
 
-    let file_size = get_file_size(&file_destination).await?;
-    let mut req = client.get(url);
-    if resumable {
-            req = req.header("Range", format!("bytes={}-", file_size));
+        if let Ok(size_on_disk) =  get_file_size(&final_file_path).await {       
+            if size_on_disk > 0 && size_on_disk == total_size {
+                println!("File was already fully downloaded");
+                return Ok("File already on disk".to_string());
+            }
+        }
+
     }
 
-    let response = check_request(req).await?;
-    let total_size = match response.content_length() {
-        Some(ct) => ct,
-        None => return Err(LeviError::Url("Url doesn't provide content_length".to_string())),
-    };
+    // if resumable && Path::new(&final_file_path).try_exists()? {
+    //     
+    // }
 
-    write_file(file, response, timeout_in_secs, file_size, total_size).await?;
-    Ok(())
+    let part_size = total_size / num_parts as u64;
+    let file_parts = stream::iter(0..num_parts).map(|part| {
+        let file_destination = format!("{file_destination}.part{part}");
+        let req = client.get(url);
+
+        async move {
+            let _ = download_part(file_destination, req, timeout_in_secs, part, part_size, num_parts, total_size).await;
+        }
+    });
+    file_parts.buffer_unordered(num_parts).collect::<Vec<_>>().await;
+
+    let final_file = create_file(&final_file_path, resumable).await?;
+    merge_parts(final_file, file_destination, num_parts).await?;
+    Ok("file downloaded".to_string())
 }
 
-async fn write_file(mut file: File, mut res: Response, timeout_in_secs: usize, file_size: u64, total_size: u64) -> Result<(), LeviError> {
+async fn download_part(
+    file_path: String,
+    req: RequestBuilder,
+    timeout_in_secs: usize,
+    part_number: usize,
+    part_size: u64,
+    num_parts: usize,
+    total_size: u64,
+) -> Result<(), LeviError> {
 
-    println!("Total size: {total_size}");
-    let mut progress = file_size;
+    let start = part_number as u64 * part_size;
+    let end = if part_number == num_parts -1 {
+        total_size
+    } else {
+        (part_number as u64 + 1) * part_size - 1
+    };
 
+    let req = req.header("Range", format!("bytes={}-{}", start, end));
+    let mut res = check_request(req).await?;
+
+    // println!("Total size: {total_size}");
+    // let mut progress = file_size;
+
+    let f = create_file(&file_path, true).await?;
+    let mut file = BufWriter::new(f);
     let chunk_timeout = Duration::from_secs(timeout_in_secs as u64);
     loop {
        select! {
@@ -56,8 +97,8 @@ async fn write_file(mut file: File, mut res: Response, timeout_in_secs: usize, f
                     file.write_all(&chunk).await?;
                     file.flush().await?;
 
-                    progress += chunk.len() as u64;
-                    println!("{:.2}%", ( progress as f64 / total_size as f64 ) * 100.0);
+                    // progress += chunk.len() as u64;
+                    // println!("{:.2}%", ( progress as f64 / total_size as f64 ) * 100.0);
                 } else {
                     // End of download
                     file.flush().await?;
@@ -65,7 +106,25 @@ async fn write_file(mut file: File, mut res: Response, timeout_in_secs: usize, f
                 }
             }
         }
- 
+    }
+    Ok(())
+}
+
+// TODO use BufRead and BufWrite 
+async fn merge_parts(mut final_file: File, parts_path: String, num_parts: usize) -> Result<(), LeviError> {
+
+    for part in 0..num_parts {
+        let part_path = format!("{}.part{}", parts_path, part);
+        let part_file = File::open(&part_path).await?;
+
+        let mut reader = BufReader::new(part_file);
+        let mut buffer = vec![];
+        reader.read_to_end(&mut buffer).await?;
+
+        final_file.write_all(&buffer).await?;
+        final_file.flush().await?;
+
+        fs::remove_file(&part_path).await?;
     }
     Ok(())
 }
