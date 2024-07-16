@@ -1,6 +1,8 @@
 use errors::LeviError;
 use reqwest::Client;
-use futures::{stream, StreamExt};
+use futures::{select, stream, StreamExt};
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 mod errors;
 mod requests;
@@ -20,11 +22,19 @@ async fn main() -> Result<(), LeviError> {
         // "https://images6.alphacoders.com/136/1365892.png",
         "https://iso.pop-os.org/22.04/amd64/intel/41/pop-os_22.04_amd64_intel_41.iso",
     ];
-
     let timeout = 10;
+    let token = CancellationToken::new();
+    let token_clone = token.clone();
+
+    let token_handle = tokio::spawn(async move {
+        loop {
+            signal::ctrl_c().await.expect("ctrl-c");
+            token.cancel();
+        }
+    });
 
     let downloads = stream::iter(urls)
-        .map(|url| downloader::download(&client, timeout, file_parts, path.to_string(), url))
+        .map(|url| downloader::download(&client, timeout, file_parts, path.to_string(), url, &token_clone))
         .buffer_unordered(concurrent_downloads)
         .collect::<Vec<_>>()
         .await;

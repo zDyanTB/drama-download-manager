@@ -3,6 +3,7 @@ use reqwest::{Client, RequestBuilder};
 use tokio::io::{BufReader, BufWriter, AsyncReadExt, AsyncWriteExt};
 use tokio::fs::{self, File};
 use tokio::select;
+use tokio_util::sync::CancellationToken;
 use tokio::time::{timeout, Duration};
 use std::path::Path;
 
@@ -12,7 +13,7 @@ use crate::requests::{ check_request, get_content_length, is_resumable };
 use crate::files::{create_file, get_file_size};
 
 // TODO debug this file
-pub async fn download(client: &Client, timeout_in_secs: usize, num_parts: usize, file_path: String, url: &str) -> Result<String, LeviError> {
+pub async fn download(client: &Client, timeout_in_secs: usize, num_parts: usize, file_path: String, url: &str, token: &CancellationToken) -> Result<String, LeviError> {
     // https://github.com/agourlay/dlm/issues/293
     let head_res = check_request(client.head(url)).await?;
     let resumable = is_resumable(&head_res).await;
@@ -50,9 +51,10 @@ pub async fn download(client: &Client, timeout_in_secs: usize, num_parts: usize,
     let file_parts = stream::iter(0..num_parts).map(|part| {
         let file_destination = format!("{file_destination}.part{part}");
         let req = client.get(url);
+        let token = token.clone();
 
         async move {
-            let _ = download_part(file_destination, req, timeout_in_secs, part, part_size, num_parts, total_size).await;
+            let _ = download_part(file_destination, req, timeout_in_secs, part, part_size, num_parts, total_size, token).await;
         }
     });
     file_parts.buffer_unordered(num_parts).collect::<Vec<_>>().await;
@@ -70,6 +72,7 @@ async fn download_part(
     part_size: u64,
     num_parts: usize,
     total_size: u64,
+    token: CancellationToken,
 ) -> Result<(), LeviError> {
 
     let start = part_number as u64 * part_size;
@@ -89,7 +92,12 @@ async fn download_part(
     let mut file = BufWriter::new(f);
     let chunk_timeout = Duration::from_secs(timeout_in_secs as u64);
     loop {
-       select! {
+        select! {
+            _ = token.cancelled() => {
+                file.flush().await?;
+                println!("program stopped");
+                return Ok(());
+            }
             chunk = timeout(chunk_timeout, res.chunk()) => {
                 let chunk = chunk??;
            
